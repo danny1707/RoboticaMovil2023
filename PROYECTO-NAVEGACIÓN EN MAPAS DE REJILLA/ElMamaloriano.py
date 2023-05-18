@@ -18,11 +18,6 @@ from skimage.draw import line
 import cv2
 import astarmod
 
-def plot_map():
-    global map
-    plt.imshow(map)
-    plt.show()
-
 '''
     # Tamaño del mapa de ocupación
 initial_cols = 100
@@ -41,9 +36,30 @@ else:
     tocc = np.zeros((grid_rows, grid_cols))
 '''
 
+def plot_map():
+    global tocc, occgrid
+    plt.imshow(tocc+occgrid)
+    plt.show()
+
+# Tamaño del mapa de ocupación
+initial_cols = 100
+initial_rows = 100
+grid_cols = initial_cols
+grid_rows = initial_rows
+
 # Cargar el archivo de texto
-map = np.loadtxt('testmap.txt')
-plot_map()
+if os.path.exists('testmap.txt'):
+    print('Map found. Loading...')
+    occgrid = np.loadtxt('testmap.txt')
+    tocc = 1*(occgrid > 0.5)
+    occgrid[occgrid > 0.5] = 0
+else:
+    print('Creating new map')
+    occgrid = 0.5*np.ones((grid_rows,grid_cols))
+    tocc = np.zeros((grid_rows, grid_cols))
+    
+#map = np.loadtxt('testmap.txt')
+#plot_map(map)
 
 # -------- CREACIÓN DE CIRCULOS EN EL MAPA ---------
 '''
@@ -62,15 +78,17 @@ for k in range(Ncircles):
 
 cfree = False
 while not cfree:
-    loc = np.random.randint(0, 150, (4,))
-    vals = map[loc[0], loc[1]]
-    vale = map[loc[2], loc[3]]
+    loc = np.random.randint(0, 100, (4,))
+    vals = tocc[loc[0], loc[1]]
+    vale = tocc[loc[2], loc[3]]
     if vals == 0 and vale == 0:
         cfree = True
 print(loc)
 
-route = astarmod.astar(map, (loc[0], loc[1]), (loc[2], loc[3]), allow_diagonal_movement=True)
+route = astarmod.astar(tocc, (loc[0], loc[1]), (loc[2], loc[3]), allow_diagonal_movement=True)
 rr, cc = astarmod.path2cells(route)
-map[rr, cc] = 128
-plot_map()
+tocc[rr, cc] = 128
 # -------- FIN ----- CREACIÓN DE RUTA MÁS CORTA  ---------
+
+# Imprimir el mapa de ocupación y la ruta en subplots
+plot_map()
