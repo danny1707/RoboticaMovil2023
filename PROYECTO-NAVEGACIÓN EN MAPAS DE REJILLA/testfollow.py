@@ -58,5 +58,20 @@ rr, cc = astarmod.path2cells(route)
 tocc[rr, cc] = 2
 # -------- FIN ----- CREACIÓN DE RUTA MÁS CORTA  ---------
 
+plot_map()
+
+client = RemoteAPIClient()
+sim = client.getObject('sim')
+
+motorL=sim.getObject('/PioneerP3DX/leftMotor')
+motorR=sim.getObject('/PioneerP3DX/rightMotor')
+robot = sim.getObject('/PioneerP3DX')
+
+sim.startSimulation()
+
+carpos = sim.getObjectPosition(robot, -1)
+carrot = sim.getObjectOrientation(robot, -1)
+
+sim.stopSimulation()
 # Imprimir el mapa de ocupación y la ruta en subplots
 plot_map()

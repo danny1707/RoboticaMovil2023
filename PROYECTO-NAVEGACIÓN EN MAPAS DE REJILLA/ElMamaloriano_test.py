@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Occupancy grid creation using a Pioneer pd3x with ultrasonic sensors.
-
-Author: Juan-Pablo Ramirez-Paredes <jpi.ramirez@ugto.mx>
-Mobile Robotics course, University of Guanajuato (2023)
-"""
-
 import numpy as np
 import time
 import math as m
@@ -18,6 +9,8 @@ from zmqRemoteApi import RemoteAPIClient
 from skimage.draw import line 
 #from skimage.draw import line
 import cv2
+import astarmod
+import cbor
 
 def q2R(x,y,z,w):
     R = np.zeros((3,3))
@@ -41,12 +34,13 @@ def front_sensors(): #lee el buffer de los sensores 3,4, y regresa un array de b
     sensores_state =  []
     for s in range(3,4): 
         state_temp, distance, point, detectedObj, _ = sim.readProximitySensor(usensor[s])
-        bresenham(state_temp, s, point)
+        #bresenham(state_temp, s, point)
         sensores_state.append(state_temp)
         if state_temp is True:
             break
     return sensores_state, point
 
+'''
 def bresenham(state, n_sensor, point):
     global occgrid, tocc, grid_cols, grid_rows, x_ajuste, y_ajuste, xr,yr
     srot = sim.getObjectQuaternion(usensor[n_sensor], -1)
@@ -183,6 +177,7 @@ def bresenham(state, n_sensor, point):
         rows, cols = line(yr-1, xr-1, yo-1, xo-1)
         occgrid[rows, cols] = 0
     return
+'''
 
 def position_in_grid():
     
@@ -209,7 +204,7 @@ def esquivar():
     global uread,upt,ustate
     for i in range(16): 
         state, distance, point, detectedObj, _ = sim.readProximitySensor(usensor[i])
-        bresenham(state, i, point)
+        #bresenham(state, i, point)
         uread.append(np.linalg.norm(point))
         upt.append(point)
         ustate.append(state)
@@ -222,7 +217,7 @@ def esquivar():
               errf = stop_moving()
               while state is False: #gira hasta que el sensor que detectó el obtejo deje de verlo 
                   state, distance, point, detectedObj, _ = sim.readProximitySensor(usensor[i])
-                  bresenham(state,i,point)
+                  #bresenham(state,i,point)
                   errf = sim.setJointTargetVelocity(motorL, 0.7)
                   errf = sim.setJointTargetVelocity(motorR, -0.7)
               errf = stop_moving()
@@ -253,7 +248,7 @@ def esquivar():
               errf = stop_moving()
               while state is False:
                   state, distance, point, detectedObj, _ = sim.readProximitySensor(usensor[i])
-                  bresenham(state, i, point)
+                  #bresenham(state, i, point)
                   errf = sim.setJointTargetVelocity(motorL, -0.7)
                   errf = sim.setJointTargetVelocity(motorR, 0.7)
               errf = stop_moving()
@@ -286,7 +281,7 @@ def esquivar():
               errf = stop_moving()
               while state is True:
                   state, distance, point, detectedObj, _ = sim.readProximitySensor(usensor[i])
-                  bresenham(state, i, point)
+                  #bresenham(state, i, point)
                   errf = sim.setJointTargetVelocity(motorL, -0.7)
                   errf = sim.setJointTargetVelocity(motorR, -0.7)
               errf = stop_moving()
@@ -299,6 +294,110 @@ def esquivar():
                   errf = sim.setJointTargetVelocity(motorR, 0.7)
               stop_moving()
     return
+
+'''
+# Generar puntos aleatorios entre -6 y +6
+#cambiarán con cada compilación
+num_points = 10
+xarr = [0]
+yarr = [0]
+while len(xarr) < num_points:
+    x = np.random.uniform(-6, 6)
+    y = np.random.uniform(-6, 6)
+    xarr.append(x)
+    yarr.append(y)
+
+#Tt = 20
+# Crear un arreglo de tiempo
+tarr = np.linspace(0, 10, num_points)
+
+# Crear un arreglo de tiempo para la interpolación
+# Se crean 200 instantes de tiempo
+tnew = np.linspace(0, 10, 200)
+
+# Interpolar los puntos
+xc = spi.splrep(tarr, xarr, s=0.0)
+yc = spi.splrep(tarr, yarr, s=0.0)
+
+xnew = spi.splev(tnew, xc, der=0)
+ynew = spi.splev(tnew, yc, der=0)
+
+'''
+
+# Definir una función que convierta la velocidad lineal y angular del robot en las velocidades de los motores
+def v2u(v, omega, r, L):
+    return (v/r + L*omega/(2*r), v/r - L*omega/(2*r))
+
+# Definir una función que controle los motores del robot para moverlo a una velocidad y una velocidad angular durante un tiempo determinado
+def MovR(sim, motorL, motorR, v, omega, duration):
+    end_time = sim.getSimulationTime() + duration
+    while sim.getSimulationTime() < end_time:
+        sim.setJointTargetVelocity(motorL, v2u(v, omega, R, L)[1])
+        sim.setJointTargetVelocity(motorR, v2u(v, omega, R, L)[0])
+'''
+# Inicializar la simulación y obtener los objetos necesarios
+client = RemoteAPIClient()
+sim = client.getObject('sim')
+motorL = sim.getObject("/PioneerP3DX/leftMotor")
+motorR = sim.getObject("/PioneerP3DX/rightMotor")
+robot = sim.getObject("/PioneerP3DX")
+
+nSensor = 4
+sensors = [sim.getObject(f"/PioneerP3DX/ultrasonicSensor[{i}]") for i in range (nSensor)]
+
+def RSens (sim, sensor):
+    maxD = 0.8
+    detect = False
+    LAct = False
+    RAct = False
+    detected = [0] * len(sensors)
+    act_l = [0] * len(sensor)
+    vel = [0] * len(sensors)
+    for i in range(len(sensor)):
+        result, distance, _, _, _ = sim.readProximitySensor(sensors[i])
+        if result and distance < maxD:
+            detect = True
+            if i < len(sensors)/2:
+                LAct = True
+            else:
+                RAct = True
+            detected[i] = distance
+            act_l[i] = 1
+            vel[i] = 1 - ((distance - 0.2) / (maxD - 0.2))
+            if distance < 0.2:
+                vel[i] = 2
+    return detect, detected, LAct, RAct, act_l, vel        
+
+
+# Definir la rutina de evasión de obstáculos
+def evadir_obstaculo(sim, motorL, motorR):
+    # Detener el robot
+    sim.setJointTargetVelocity(motorL, 0)
+    sim.setJointTargetVelocity(motorR, 0)
+    
+    # Girar el robot hacia la derecha
+    sim.setJointTargetVelocity(motorL, -0.5)
+    sim.setJointTargetVelocity(motorR, 0.5)
+    
+    # Esperar a que el robot gire lo suficiente
+    time.sleep(0.5)
+    
+    # Detener el robot
+    sim.setJointTargetVelocity(motorL, 0)
+    sim.setJointTargetVelocity(motorR, 0)
+    
+    # Mover el robot hacia adelante
+    sim.setJointTargetVelocity(motorL, 0.5)
+    sim.setJointTargetVelocity(motorR, 0.5)
+    
+    # Esperar a que el robot evada el obstáculo
+    time.sleep(1)
+    
+    # Detener el robot
+    sim.setJointTargetVelocity(motorL, 0)
+    sim.setJointTargetVelocity(motorR, 0)
+'''
+# ------ INICIO DE LECTURA Y CREACIÓN DE RUTA ---------
 
 client = RemoteAPIClient()
 sim = client.getObject('sim')
@@ -332,8 +431,8 @@ r = 0.1
 L = 0.2
 errp = 10
     # Tamaño del mapa de ocupación
-initial_cols = 100
-initial_rows = 100
+initial_cols = 150
+initial_rows = 150
 grid_cols = initial_cols
 grid_rows = initial_rows
 x_ajuste = 0 #por si se expande hacia la izquierda
@@ -341,31 +440,44 @@ y_ajuste = 0 #por si se expande hacia arriba
 xr = 0
 yr = 0
 
-if os.path.exists('map.txt'):
+# Cargar el archivo de texto
+if os.path.exists('testmap.txt'):
     print('Map found. Loading...')
-    occgrid = np.loadtxt('map.txt')
-    tocc = 1.0*(occgrid > 0.5)
+    occgrid = np.loadtxt('testmap.txt')
+    tocc = 1*(occgrid > 0.5)
     occgrid[occgrid > 0.5] = 0
 else:
     print('Creating new map')
     occgrid = 0.5*np.ones((grid_rows,grid_cols))
     tocc = np.zeros((grid_rows, grid_cols))
+
 t = time.time()
+
+# -------- CREACIÓN DE RUTA MÁS CORTA  ---------
+
+cfree = False
+while not cfree:
+    loc = np.random.randint(0, 150, (4,))
+    vals = tocc[loc[0], loc[1]]
+    vale = tocc[loc[2], loc[3]]
+    if vals == 0 and vale == 0:
+        cfree = True
+print(loc)
+print('punto de inicio', loc[0], loc[1])
+print('punto de termino', loc[2], loc[3])
+
+route = astarmod.astar(tocc, (loc[0], loc[1]), (loc[2], loc[3]), allow_diagonal_movement=True)
+rr, cc = astarmod.path2cells(route)
+tocc[rr, cc] = 2
+
+# -------- FIN ----- CREACIÓN DE RUTA MÁS CORTA  ---------
+
+# ------ FIN DE LECTURA Y CREACIÓN DE RUTA ---------
 
 initt = t
 niter = 0
-while time.time()-t < 480:
+while time.time()-t < 10:
     carpos, carrot = position_in_grid()
-
-    xw = carpos[0]
-    yw = carpos[1]
-    xr = 50 + m.ceil(xw/0.1)
-    yr = 50 - m.floor(yw/0.1)
-    if xr >= 100:
-        xr = 100
-    if yr >= 100:
-        yr = 100
-    occgrid[yr-1, xr-1] = 0
 
     carrot = sim.getObjectQuaternion(robot, -1)
 
@@ -380,63 +492,81 @@ while time.time()-t < 480:
         uread.append(distance)
         upt.append(point)
         ustate.append(state)
+
+        # Definir el radio de las ruedas y la distancia entre ellas para el cálculo de la velocidad de los motores
+        R, L = 0.0975, 0.331
         
-        # Transform detection from sensor frame to robot frame
-        if state == True:
-            opos = np.array(point).reshape((3,1))
-        else:
-            opos = np.array([0,0,1]).reshape((3,1))
-
-        robs = np.matmul(Rs[i], opos) + Vs[i]
+        # Guardar la posición inicial del robot
+        x, y, _ = sim.getObjectPosition(robot, -1)
+        coords = [(x, y)]
         
-        # Transform detection from robot frame to global frame
+        fig, ax = plt.subplots() #Figura del trayecto
+        move, rotate = .7, .7 #Avance y rotación
+        '''
+        -x-x-x-x-x-x-x-x-x-x-x-x-x
+        INICIO DE TRAYECTORIA
+        -x-x-x-x-x-x-x-x-x-x-x-x-x
+        '''
+            
+        # Seguir la trayectoria con el robot
+        for i in range(len(rr)):
+            # Obtener la posición actual del robot
+            x, y, _ = sim.getObjectPosition(robot, -1)
+            coords.append((x, y))
         
-        R = q2R(carrot[0], carrot[1], carrot[2], carrot[3])
-        rpos = np.array(carpos).reshape((3,1))
-        pobs = np.matmul(R, robs) + rpos
+            # Obtener la dirección del robot
+            _, _, theta = sim.getObjectOrientation(robot, -1)
+        
+            # Obtener el punto actual del spline
+            x_target, y_target = rr[i], cc[i]
+        
+            # Calcular la distancia al punto actual
+            distance_to_target = np.sqrt((x_target - x)**2 + (y_target - y)**2)
+        
+            # Calcular el ángulo de dirección hacia el siguiente punto
+            target_angle = np.arctan2(y_target - y, x_target - x)
+        
+            # Calcular la velocidad lineal y angular del robot
+            delta_angle = target_angle - theta
+            if delta_angle > np.pi:
+                delta_angle -= 2 * np.pi
+            elif delta_angle < -np.pi:
+                delta_angle += 2 * np.pi
+        
+            # Ajustar la velocidad lineal y angular del robot
+            v = move
+            omega = rotate * delta_angle
+        
+            # mover el robot durante un breve período de tiempo
+            MovR(sim, motorL, motorR, v, omega, 0.1)
+            
+            x, y, _ = sim.getObjectPosition(robot, -1) #Guardado de coordenadas
+            coords.append((x, y))
+        
+            '''
+            -x-x-x-x-x-x-x-x-x
+            FIN DE TRAYECTORIA
+            -x-x-x-x-x-x-x-x-x
+            '''
+            
+            esquivar()
+            front_sensors()
+        niter = niter + 1
 
-        # Transform detection from global frame to occupancy grid cells
-        xs = pobs[0]
-        ys = pobs[1]
-        xo = 50 + m.ceil(xs/0.1)
-        yo = 50 - m.floor(ys/0.1)
-        if xo >= 100:
-            xo = 100
-        if yo >= 100:
-            yo = 100
-        if state:
-            tocc[yo-1, xo-1] = 1
-        occgrid = cv2.line(occgrid, (xr-1, yr-1), (xo-1, yo-1), (0,0,0), 1)
-
-    # Reactive navigation block
-    ul = 2
-    ur = 2
-    lgains = np.linspace(0,-1,len(upt)//2)
-    rgains = np.linspace(-1,0,len(upt)//2)
-    for k in range(len(upt)//2):
-        if ustate[k]:
-            ul = ul + lgains[k]*(1.0 - uread[k])
-            ur = ur + rgains[k]*(1.0 - uread[k])
-    print('lvel {}   rvel {}'.format(ul, ur))
-    plot_map()
-
-    sim.setJointTargetVelocity(motorL, ul)
-    sim.setJointTargetVelocity(motorR, ur)
-
-    esquivar()
-    front_sensors()
-    niter = niter + 1
-
-print(lgains)
-print(rgains)
 finalt = time.time()
 print('Avg time per iteration ', (finalt-initt)/niter)
 
 sim.setJointTargetVelocity(motorL, 0)
 sim.setJointTargetVelocity(motorR, 0)
-    
+            
 sim.stopSimulation()
-
-plt.imshow(tocc+occgrid)
+'''
+# Graficar la trayectoria del robot
+x, y = zip(*coords)
+ax.plot(x, y, ".", ls="-", c="g")
+ax.plot(x[0], y[0], "X", c="r")
+plt.plot(rr, cc)
+plt.plot(rr, cc, '.')
+ax.set_title("TRAYECTORIA")
 plt.show()
-np.savetxt('map.txt', tocc+occgrid)
+'''
